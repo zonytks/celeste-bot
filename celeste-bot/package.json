@@ -1,0 +1,7 @@
+{
+  "name": "celeste-order-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Telegram-бот приёма заказов для Céleste",
+  "main": "index.js"
+}
