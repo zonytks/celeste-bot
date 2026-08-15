@@ -2,6 +2,9 @@ const MENU = require("../menu.js");
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID;
+// Необязательно: ID темы (топика) в группе, куда слать заказы.
+// Если не задан — уходит в общий чат группы.
+const GROUP_TOPIC_ID = process.env.GROUP_TOPIC_ID;
 const API_URL = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 // Уникальный маркер, которым мы прячем данные заказа внутри текста
@@ -186,11 +189,14 @@ module.exports = async (req, res) => {
           (msg.from.username && `@${msg.from.username}`) ||
           [msg.from.first_name, msg.from.last_name].filter(Boolean).join(" ");
 
-        await tg("sendMessage", {
+        const groupPayload = {
           chat_id: GROUP_CHAT_ID,
           text: finalCard(ci, ii, qty, note, manager),
           parse_mode: "HTML",
-        });
+        };
+        if (GROUP_TOPIC_ID) groupPayload.message_thread_id = Number(GROUP_TOPIC_ID);
+
+        await tg("sendMessage", groupPayload);
 
         await tg("sendMessage", {
           chat_id: chatId,
@@ -209,11 +215,14 @@ module.exports = async (req, res) => {
         return res.status(200).end();
       }
 
-      // Любой другой текст без контекста — подсказка
-      await tg("sendMessage", {
-        chat_id: chatId,
-        text: "Напиши /order, чтобы начать новый заказ.",
-      });
+      // Любой другой текст без контекста: в личке — подсказка,
+      // в группе — молчим, чтобы не спамить на обычную переписку.
+      if (msg.chat.type === "private") {
+        await tg("sendMessage", {
+          chat_id: chatId,
+          text: "Напиши /order, чтобы начать новый заказ.",
+        });
+      }
     }
 
     res.status(200).end();
