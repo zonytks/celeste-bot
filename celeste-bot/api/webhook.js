@@ -7,11 +7,28 @@ const GROUP_CHAT_ID = process.env.GROUP_CHAT_ID;
 const GROUP_TOPIC_ID = process.env.GROUP_TOPIC_ID;
 const API_URL = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-// Уникальный маркер, которым мы прячем данные заказа внутри текста
-// сообщения-вопроса о примечании. Когда менеджер отвечает на это
-// сообщение (reply), мы читаем маркер из reply_to_message и
-// восстанавливаем заказ — без базы данных и без сессий.
-const MARK = "\u241FORDER\u241F";
+// Прячем данные заказа в невидимых unicode-символах (zero-width),
+// а не видимым текстом — менеджер не должен видеть техническую часть.
+function encodeInvisible(obj) {
+  const bytes = Buffer.from(JSON.stringify(obj), "utf8");
+  let bits = "";
+  for (const b of bytes) bits += b.toString(2).padStart(8, "0");
+  return bits.split("").map((bit) => (bit === "0" ? "\u200B" : "\u200C")).join("");
+}
+
+function decodeInvisible(text) {
+  if (!text) return null;
+  const chars = [...text].filter((c) => c === "\u200B" || c === "\u200C");
+  if (chars.length === 0 || chars.length % 8 !== 0) return null;
+  const bits = chars.map((c) => (c === "\u200B" ? "0" : "1")).join("");
+  const bytes = [];
+  for (let i = 0; i < bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
+  try {
+    return JSON.parse(Buffer.from(bytes).toString("utf8"));
+  } catch {
+    return null;
+  }
+}
 
 async function tg(method, payload) {
   const res = await fetch(`${API_URL}/${method}`, {
@@ -74,12 +91,14 @@ function orderSummaryText(ci, ii, qty) {
 }
 
 function askNoteText(ci, ii, qty) {
-  // Видимая часть — обычный вопрос. Невидимая (маркер + json) —
-  // техническая, чтобы восстановить заказ из ответа менеджера.
+  // Видимая часть — обычный вопрос. Техническая часть (маркер + json)
+  // спрятана под спойлер, чтобы не мозолить глаза менеджеру, но
+  // всё ещё была доступна в msg.text для парсинга при ответе.
   const visible =
     `✍️ Напиши примечание к заказу (данные клиента, вкусы, дата/время, пожелания).\n` +
     `Если примечаний нет — отправь "-".`;
-  return `${visible}\n\n${MARK}${JSON.stringify({ c: ci, i: ii, q: qty })}`;
+  const payload = `${MARK}${JSON.stringify({ c: ci, i: ii, q: qty })}`;
+  return `${visible}\n\n<tg-spoiler>${payload}</tg-spoiler>`;
 }
 
 function finalCard(ci, ii, qty, note, managerName) {
@@ -167,6 +186,7 @@ module.exports = async (req, res) => {
         await tg("sendMessage", {
           chat_id: chatId,
           text: askNoteText(ci, ii, qty),
+          parse_mode: "HTML",
           reply_markup: { force_reply: true },
         });
       }
